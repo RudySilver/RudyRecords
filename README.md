@@ -44,29 +44,30 @@ git clone https://github.com/RudySilver/RudyRecord.git
 cd RudyRecord
 bash install.sh
 
+```
 No sudo. Per-user install. Clean uninstall included.
 🔐 Privacy
 
-    No network access
+ No network access
 
-    No telemetry
+No telemetry
 
-    No hidden processes
+No hidden processes
 
-    Your files, your machine
+Your files, your machine
 
 Offline by design.
 🧪 Requirements
 
-    Linux (X11 recommended)
+Linux (X11 recommended)
 
-    Python 3.8+
+Python 3.8+
 
 Wayland support depends on compositor permissions.
 🧹 Uninstall
-
+```
 bash uninstall.sh
-
+```
 Removes everything. No leftovers.
 💎 Author
 
