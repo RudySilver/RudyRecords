@@ -1,135 +1,121 @@
 #!/usr/bin/env python3
-import os, sys, time, json, subprocess, signal, psutil
-from datetime import datetime
+import os, sys, json, signal, subprocess, time
 
-HOME = os.path.expanduser("~")
-BASE = os.path.join(HOME, ".rudyrecord")
-STATE_FILE = os.path.join(BASE, "state.json")
-LOG_FILE = os.path.join(BASE, "ffmpeg.log")
-VIDEOS = os.path.join(HOME, "Videos")
-FPS_DEFAULT = 60
+BASE = os.path.expanduser("~/.rudyrecord")
+PID_FILE = os.path.join(BASE, "ffmpeg.pid")
+INFO_FILE = os.path.join(BASE, "info.json")
+VIDEO_DIR = os.path.expanduser("~/Videos")
+FPS = 60
 
-os.makedirs(BASE, exist_ok=True)
-os.makedirs(VIDEOS, exist_ok=True)
+def ensure():
+    os.makedirs(BASE, exist_ok=True)
+    os.makedirs(VIDEO_DIR, exist_ok=True)
 
-def atomic_write(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(data)
-    os.replace(tmp, path)
+def pid_alive(pid):
+    return os.path.exists(f"/proc/{pid}")
 
-def read_state():
+def load_pid():
     try:
-        with open(STATE_FILE) as f:
-            state = json.load(f)
-        p = psutil.Process(state["daemon_pid"])
-        if p.is_running(): return state
-    except: pass
-    return None
+        pid = int(open(PID_FILE).read().strip())
+        return pid if pid_alive(pid) else None
+    except:
+        return None
 
-def write_state(state):
-    atomic_write(STATE_FILE, json.dumps(state))
+def clear():
+    for f in (PID_FILE, INFO_FILE):
+        try: os.remove(f)
+        except: pass
 
-def is_wayland():
-    return bool(os.environ.get("WAYLAND_DISPLAY"))
+def backend():
+    return "wayland" if os.environ.get("WAYLAND_DISPLAY") else "x11"
 
-def get_audio():
+def audio():
     try:
-        sink = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
-        return ["-f", "pulse", "-i", sink+".monitor"]
-    except: return []
+        return subprocess.check_output(
+            ["pactl","get-default-sink"], text=True
+        ).strip() + ".monitor"
+    except:
+        return None
 
-def build_ffmpeg_cmd(fps):
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    outfile = os.path.join(VIDEOS, f"rudy_{ts}.mp4")
+def ffmpeg_cmd(outfile):
+    v = (
+        ["-f","pipewire","-i","0"]
+        if backend() == "wayland"
+        else ["-f","x11grab","-i",":0.0"]
+    )
 
-    # Video input
-    if is_wayland():
-        video = ["-f", "pipewire", "-framerate", str(fps), "-i", "0"]
-    else:
-        display = os.environ.get("DISPLAY", ":0")
-        try:
-            size = subprocess.check_output(["xdpyinfo"], text=True).split("dimensions:")[1].split()[0]
-        except: size = "1920x1080"
-        video = ["-f", "x11grab", "-framerate", str(fps), "-video_size", size, "-i", f"{display}.0+0,0"]
+    a = ["-f","pulse","-i",audio()] if audio() else []
 
-    audio = get_audio()
-    cmd = ["ffmpeg", "-y", "-loglevel", "error"] + video + audio + ["-c:v", "libx264", "-preset", "veryfast",
-            "-pix_fmt", "yuv420p", "-r", str(fps), outfile]
-    return cmd, outfile
-
-def daemonize():
-    if os.fork() > 0: sys.exit(0)
-    os.setsid()
-    if os.fork() > 0: sys.exit(0)
-    for fd in (0,1,2): os.close(fd)
-
-def record(fps):
-    daemonize()
-    cmd, outfile = build_ffmpeg_cmd(fps)
-    with open(LOG_FILE, "a") as log:
-        log.write(f"\n=== START {datetime.now()} ===\n")
-    proc = subprocess.Popen(cmd, stderr=open(LOG_FILE,"a"))
-    state = {
-        "daemon_pid": os.getpid(),
-        "ffmpeg_pid": proc.pid,
-        "start_time": time.time(),
-        "output": outfile
-    }
-    write_state(state)
-
-    def shutdown(sig, frame):
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except: proc.kill()
-        os.remove(STATE_FILE)
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
-
-    proc.wait()
-    os.remove(STATE_FILE)
+    return [
+        "ffmpeg",
+        "-y",
+        "-nostdin",
+        "-loglevel","error",
+        *v,*a,
+        "-c:v","libx264",
+        "-preset","veryfast",
+        "-pix_fmt","yuv420p",
+        outfile
+    ]
 
 def start():
-    if read_state():
+    ensure()
+    if load_pid():
         print("Already recording")
         return
-    fps = FPS_DEFAULT
-    if "--fps" in sys.argv:
-        fps = int(sys.argv[sys.argv.index("--fps")+1])
-    pid = os.fork()
-    if pid==0:
-        record(fps)
-    else:
-        print(f"Recording started ({fps} FPS)")
+
+    name = time.strftime("rudy_%Y-%m-%d_%H-%M-%S.mp4")
+    out = os.path.join(VIDEO_DIR, name)
+
+    proc = subprocess.Popen(
+        ffmpeg_cmd(out),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    time.sleep(0.5)
+
+    if not pid_alive(proc.pid):
+        print("ffmpeg failed to start")
+        return
+
+    open(PID_FILE,"w").write(str(proc.pid))
+    json.dump({"file":out}, open(INFO_FILE,"w"))
+
+    print("Recording started")
 
 def stop():
-    state = read_state()
-    if not state:
+    pid = load_pid()
+    if not pid:
         print("Not recording")
         return
-    os.kill(state["daemon_pid"], signal.SIGTERM)
+
+    os.kill(pid, signal.SIGTERM)
+
+    for _ in range(10):
+        if not pid_alive(pid):
+            break
+        time.sleep(0.2)
+
+    clear()
     print("Recording stopped")
 
 def status():
-    state = read_state()
-    if not state:
+    pid = load_pid()
+    if not pid:
         print("Not recording")
         return
+
+    info = json.load(open(INFO_FILE))
     print("Recording running")
-    print(f"Output: {state['output']}")
+    print("PID:", pid)
+    print("File:", info["file"])
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: rudyrecord {start|stop|status} [--fps N]")
+        print("Usage: rudyrecord {start|stop|status}")
         return
-    cmd = sys.argv[1]
-    if cmd=="start": start()
-    elif cmd=="stop": stop()
-    elif cmd=="status": status()
-    else: print("Unknown command")
+    {"start":start,"stop":stop,"status":status}.get(sys.argv[1],lambda:None)()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
