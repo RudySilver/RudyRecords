@@ -17,7 +17,6 @@ LOCK_FILE = os.path.join(BASE_DIR, "lock")
 DEFAULT_FPS = 60
 
 # -------------------- filesystem --------------------
-
 def ensure_dirs():
     os.makedirs(BASE_DIR, exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -38,7 +37,6 @@ def cleanup():
             pass
 
 # -------------------- environment --------------------
-
 def is_wayland():
     return bool(os.environ.get("WAYLAND_DISPLAY"))
 
@@ -50,23 +48,19 @@ def has_pulse():
         return False
 
 # -------------------- daemon --------------------
-
 def daemonize():
     if os.fork() > 0:
         os._exit(0)
     os.setsid()
     if os.fork() > 0:
         os._exit(0)
-
     os.chdir("/")
     os.umask(0)
-
     sys.stdin.close()
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
 
 # -------------------- state --------------------
-
 def read_state():
     try:
         with open(STATE_FILE) as f:
@@ -80,7 +74,6 @@ def read_state():
     return None
 
 # -------------------- ffmpeg --------------------
-
 def detect_encoder():
     try:
         enc = subprocess.check_output(["ffmpeg", "-hide_banner", "-encoders"], text=True)
@@ -101,20 +94,16 @@ def build_ffmpeg_cmd(output, fps, with_audio=True):
         video = ["-f", "pipewire", "-i", "0"]
     else:
         display = os.environ.get("DISPLAY", ":0")
-        # dynamically get screen size
         try:
             size_str = subprocess.check_output(
                 ["xdpyinfo"], text=True
             ).split("dimensions:")[1].split()[0]
         except Exception:
             size_str = "1920x1080"
-
         video = [
             "-f", "x11grab",
             "-framerate", str(fps),
             "-video_size", size_str,
-            "-use_wallclock_as_timestamps", "1",  # fix x2 speed
-            "-draw_mouse", "1",                    # cursor visible
             "-i", f"{display}.0+0,0",
         ]
 
@@ -130,31 +119,28 @@ def build_ffmpeg_cmd(output, fps, with_audio=True):
         *audio,
         *detect_encoder(),
         "-pix_fmt", "yuv420p",
+        "-r", str(fps),  # enforce correct output FPS
         output
     ]
 
 # -------------------- recorder --------------------
-
 def record(fps):
     daemonize()
     ensure_dirs()
-
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     output = os.path.join(VIDEO_DIR, f"rudy_{ts}.mp4")
 
     with open(LOG_FILE, "a") as log:
         log.write(f"\n=== START {datetime.now()} ===\n")
 
-    # try with audio, fallback to video-only
+    # Try with audio, fallback to video-only
     cmd = build_ffmpeg_cmd(output, fps, with_audio=True)
     proc = subprocess.Popen(cmd, stderr=open(LOG_FILE, "a"))
     time.sleep(0.5)
-
     if proc.poll() is not None:
         cmd = build_ffmpeg_cmd(output, fps, with_audio=False)
         proc = subprocess.Popen(cmd, stderr=open(LOG_FILE, "a"))
         time.sleep(0.5)
-
     if proc.poll() is not None:
         cleanup()
         sys.exit(1)
@@ -185,6 +171,7 @@ def record(fps):
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     while True:
         if proc.poll() is not None:
@@ -195,19 +182,15 @@ def record(fps):
         time.sleep(1)
 
 # -------------------- CLI --------------------
-
 def start():
     ensure_dirs()
     if read_state() or os.path.exists(LOCK_FILE):
         print("Already recording or starting")
         return
-
     fps = DEFAULT_FPS
     if "--fps" in sys.argv:
         fps = int(sys.argv[sys.argv.index("--fps") + 1])
-
     atomic_write(LOCK_FILE, str(time.time()))
-
     pid = os.fork()
     if pid == 0:
         record(fps)
@@ -227,7 +210,6 @@ def status(verbose=False):
     if not state:
         print("Not recording")
         return
-
     print("Recording running")
     if verbose:
         try:
@@ -248,7 +230,6 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: rudyrecord {start|stop|status} [--fps N] [--verbose]")
         return
-
     cmd = sys.argv[1]
     if cmd == "start":
         start()
