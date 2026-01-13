@@ -113,7 +113,8 @@ def build_ffmpeg_cmd(output, fps, with_audio=True):
             "-f", "x11grab",
             "-framerate", str(fps),
             "-video_size", size_str,
-            "-draw_mouse", "1",
+            "-use_wallclock_as_timestamps", "1",  # fix x2 speed
+            "-draw_mouse", "1",                    # cursor visible
             "-i", f"{display}.0+0,0",
         ]
 
@@ -125,8 +126,6 @@ def build_ffmpeg_cmd(output, fps, with_audio=True):
         "ffmpeg",
         "-y",
         "-loglevel", "error",
-        "-vsync", "vfr",  # prevent speedup
-        "-async", "1",    # sync audio
         *video,
         *audio,
         *detect_encoder(),
