@@ -1,35 +1,29 @@
 #!/usr/bin/env bash
+
+# -------------------------
+# RudyRecord Installer
+# -------------------------
+
 set -e
 
-APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP="$APP_DIR/rudyrecord.py"
+echo "Installing RudyRecord..."
 
-BASE="$HOME/.rudyrecord"
-VENV="$BASE/venv"
-BIN="$HOME/.local/bin"
-LAUNCHER="$BIN/rudyrecord"
+# Create virtual environment
+python3 -m venv ~/.rudyrecord/venv
+source ~/.rudyrecord/venv/bin/activate
 
-mkdir -p "$BASE" "$BIN"
+# Upgrade pip
+pip install --upgrade pip
 
-python3 -m venv "$VENV"
-"$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install mss opencv-python numpy psutil
+# Install dependencies
+pip install psutil numpy opencv-python mss
 
-cp "$APP" "$BASE/rudyrecord.py"
-chmod +x "$BASE/rudyrecord.py"
+# Make executable in ~/.local/bin
+mkdir -p ~/.local/bin
+cp rudyrecord.py ~/.local/bin/rudyrecord
+chmod +x ~/.local/bin/rudyrecord
 
-cat > "$LAUNCHER" <<EOF
-#!/usr/bin/env bash
-exec "$VENV/bin/python" "$BASE/rudyrecord.py" "\$@"
-EOF
-
-chmod +x "$LAUNCHER"
-
-if ! echo "$PATH" | grep -q "$BIN"; then
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-fi
-
-echo "[OK] Installed"
-echo "Restart terminal or run:"
-echo "export PATH=\$HOME/.local/bin:\$PATH"
-
+echo "[OK] RudyRecord installed."
+echo "Ensure ~/.local/bin is in your PATH:"
+echo '  export PATH=$HOME/.local/bin:$PATH'
+echo "Run using: rudyrecord start"
